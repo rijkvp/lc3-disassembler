@@ -1,0 +1,157 @@
+#!/bin/python3
+import sys, argparse
+
+def hex_to_int(x):
+    if x[0] == 'x': x = x[1:]
+    return int(x, base=16)
+
+def decode_2bin(bits):
+    if bits[0] == '1':
+        return -(pow(2,len(bits)) - int(bits, 2))
+    else:
+        return int(bits, 2)
+def decode_hex(x):
+    return hex(int(x, 2))[1:]
+
+def decode_reg(bits):
+    return 'R{}'.format(int(bits, 2))
+
+def decode_int(bits):
+    return '#{}'.format(int(bits, 2))
+
+def decode_conditions(bits):
+    r = ''
+    if bits[0] == '1':
+        r += 'n'
+    if bits[1] == '1':
+        r += 'z'
+    if bits[2] == '1':
+        r += 'p'
+    return r
+
+
+def decode_pcoffset(n, bits):
+    return n + decode_2bin(bits) + 1
+
+class Asm:
+    def __init__(self, location, opcode, operands = None, label = None):
+        self.location = location
+        self.opcode = opcode
+        self.operands = operands
+        self.label = label
+
+def decode_instruction(n, i):
+    match i[0:4]:
+        case '0001': 
+            if i[5] == '1':
+                return Asm(n, 'ADD', [decode_reg(i[4:7]), decode_reg(i[7:10]), decode_int(i[11:15])])
+            else:
+                return Asm(n, 'ADD', [decode_reg(i[4:7]), decode_reg(i[7:10]), decode_reg(i[13:15])])
+        case '0101':
+            if i[5] == '1':
+                return Asm(n, 'AND', [decode_reg(i[4:7]), decode_reg(i[7:10]), decode_int(i[11:15])])
+            else:
+                return Asm(n, 'AND', [decode_reg(i[4:7]), decode_reg(i[7:10]), decode_reg(i[13:15])])
+        case '1001':
+            return Asm(n, 'NOT', [decode_reg(i[4:7]), decode_reg(i[7:10])])
+        case '0000':
+            return Asm(n, 'BR' + decode_conditions(i[4:7]), label=decode_pcoffset(n, i[7:16]))
+        case '1100':
+            reg = decode_reg(i[7:10])
+            if reg == 'R7': 
+                return Asm(n, 'RET')
+            else:
+                return Asm(n, 'JMP', [reg])
+        case '0100': 
+            return Asm(n, 'JSR(R)')
+        case '1000':
+            return Asm('RTI')
+        case '1111':
+            trapvec = decode_hex(i[8:16])
+            short = None
+            match trapvec:
+                case 'x20':
+                    short = 'GETC'
+                case 'x21':
+                    short = 'OUT'
+                case 'x22':
+                    short = 'PUTS'
+                case 'x23':
+                    short = 'IN'
+                case 'x24':
+                    short = 'PUTSP'
+                case 'x25':
+                    short = 'HALT'
+            if short:
+                return Asm(n, short)
+            else:
+                return Asm(n, 'TRAP', [trapvec])
+        case '1110':
+            return Asm(n, 'LEA', [decode_reg(i[4:7])], decode_pcoffset(n, i[7:16]))
+        case '0010':
+            return Asm(n, 'LD', [decode_reg(i[4:7])], decode_pcoffset(n, i[7:16]))
+        case '1010':
+            return Asm(n, 'LDI', [decode_reg(i[4:7])], decode_pcoffset(n, i[7:16]))
+        case '0110':
+            return Asm(n, 'LDR', [decode_reg(i[4:7]), decode_reg(i[7:10])], decode_pcoffset(i[10:16]))
+        case '0011':
+            return Asm(n, 'ST', [decode_reg(i[4:7])], decode_pcoffset(n, i[7:16]))
+        case '1011':
+            return Asm(n, 'STI', [decode_reg(i[4:7])], decode_pcoffset(n, i[7:16]))
+        case '0111':
+            return Asm(n, 'STR', [decode_reg(i[4:7]), decode_reg(i[7:10])], decode_pcoffset(i[10:16]))
+        case _:
+            return Asm(None, 'INVALID!')
+
+def fill_instruction(n, i):
+    return Asm(n, '.FILL', [decode_hex(i)])
+
+def disassemble(auto_fill, space_labels):
+    asm_lines = []
+    labels = set()
+    asm_lines.append(Asm(None, '.ORIG', ['x3000']))
+    n = 0
+    after_halt = False
+    for line in sys.stdin:
+        num = hex_to_int(line)
+        instr = "{0:b}".format(num).zfill(16)
+        if not after_halt:
+            asm = decode_instruction(n, instr)
+            if asm.label:
+                labels.add(asm.label)
+            asm_lines.append(asm)
+            if asm.opcode == 'HALT' and auto_fill:
+                after_halt = True
+        else:
+            asm_lines.append(fill_instruction(n, instr))
+        n += 1
+
+    asm_lines.append(Asm(None, '.END'))
+
+    n = 0
+    label_names = {}
+    for l in sorted(list(labels)):
+        label_names[l] = "LABEL{}".format(n)
+        n += 1
+
+    for asm in asm_lines:
+        if asm.location in label_names:
+            print(label_names[asm.location], end='\n' if space_labels else '') 
+        print('\t', asm.opcode, end='')
+        params = []
+        if asm.operands:
+            params.extend(asm.operands)
+        if asm.label:
+            params.append(label_names[asm.label])
+        if len(params) > 0:
+            print('\t', ', '.join(params), end='')
+        print('')
+
+parser = argparse.ArgumentParser(
+        prog = 'LC-3 Disassembler',
+        description = 'Disassemble LC-3 machine code',
+        epilog = 'By Rijk van Putten <rijk@rijkvp.nl>')
+parser.add_argument('-f', '--fill', action='store_true', help='instructions after halt are interpreted as .FILL')
+parser.add_argument('-s', '--space', action='store_true', help='put space around labels')
+args = parser.parse_args()
+disassemble(args.fill, args.space)
