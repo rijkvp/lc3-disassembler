@@ -1,23 +1,25 @@
 #!/bin/python3
 import sys, argparse
 
-def hex_to_int(x):
+def parse_hex(x):
     if x[0] == 'x': x = x[1:]
     return int(x, base=16)
 
-def decode_2bin(bits):
+def parse_2scompl(bits):
     if bits[0] == '1':
         return -(pow(2,len(bits)) - int(bits, 2))
     else:
         return int(bits, 2)
+
+
 def decode_hex(x):
     return hex(int(x, 2))[1:]
 
+def decode_int(bits):
+    return '#{}'.format(parse_2scompl(bits))
+
 def decode_reg(bits):
     return 'R{}'.format(int(bits, 2))
-
-def decode_int(bits):
-    return '#{}'.format(int(bits, 2))
 
 def decode_conditions(bits):
     r = ''
@@ -29,9 +31,8 @@ def decode_conditions(bits):
         r += 'p'
     return r
 
-
 def decode_pcoffset(n, bits):
-    return n + decode_2bin(bits) + 1
+    return n + parse_2scompl(bits) + 1
 
 class Asm:
     def __init__(self, location, opcode, operands = None, label = None):
@@ -41,6 +42,9 @@ class Asm:
         self.label = label
 
 def decode_instruction(n, i):
+    if len(i) != 16:
+            print("Invalid instruction length {} of '{}' on location {}!".format(len(i), i, n))
+            exit()
     match i[0:4]:
         case '0001': 
             if i[5] == '1':
@@ -66,26 +70,6 @@ def decode_instruction(n, i):
             return Asm(n, 'JSR(R)')
         case '1000':
             return Asm('RTI')
-        case '1111':
-            trapvec = decode_hex(i[8:16])
-            short = None
-            match trapvec:
-                case 'x20':
-                    short = 'GETC'
-                case 'x21':
-                    short = 'OUT'
-                case 'x22':
-                    short = 'PUTS'
-                case 'x23':
-                    short = 'IN'
-                case 'x24':
-                    short = 'PUTSP'
-                case 'x25':
-                    short = 'HALT'
-            if short:
-                return Asm(n, short)
-            else:
-                return Asm(n, 'TRAP', [trapvec])
         case '1110':
             return Asm(n, 'LEA', [decode_reg(i[4:7])], decode_pcoffset(n, i[7:16]))
         case '0010':
@@ -100,8 +84,30 @@ def decode_instruction(n, i):
             return Asm(n, 'STI', [decode_reg(i[4:7])], decode_pcoffset(n, i[7:16]))
         case '0111':
             return Asm(n, 'STR', [decode_reg(i[4:7]), decode_reg(i[7:10])], decode_pcoffset(i[10:16]))
+        case '1111':
+            trapvec = decode_hex(i[8:16])
+            shorthand = None
+            match trapvec:
+                case 'x20':
+                    shorthand = 'GETC'
+                case 'x21':
+                    shorthand = 'OUT'
+                case 'x22':
+                    shorthand = 'PUTS'
+                case 'x23':
+                    shorthand = 'IN'
+                case 'x24':
+                    shorthand = 'PUTSP'
+                case 'x25':
+                    shorthand = 'HALT'
+            if shorthand:
+                return Asm(n, shorthand)
+            else:
+                return Asm(n, 'TRAP', [trapvec])
         case _:
-            return Asm(None, 'INVALID!')
+            print("Invalid opcode or instruction '{}' on location {}!".format(i, n))
+            exit()
+
 
 def fill_instruction(n, i):
     return Asm(n, '.FILL', [decode_hex(i)])
@@ -113,8 +119,11 @@ def disassemble(auto_fill, space_labels):
     n = 0
     after_halt = False
     for line in sys.stdin:
-        num = hex_to_int(line)
-        instr = "{0:b}".format(num).zfill(16)
+        if line[0] == 'x':
+            instr_val = parse_hex(line)
+            instr = "{0:b}".format(instr_val).zfill(16)
+        else:
+            instr = line.strip()
         if not after_halt:
             asm = decode_instruction(n, instr)
             if asm.label:
@@ -147,6 +156,7 @@ def disassemble(auto_fill, space_labels):
             print('\t', ', '.join(params), end='')
         print('')
 
+
 parser = argparse.ArgumentParser(
         prog = 'LC-3 Disassembler',
         description = 'Disassemble LC-3 machine code',
@@ -154,4 +164,5 @@ parser = argparse.ArgumentParser(
 parser.add_argument('-f', '--fill', action='store_true', help='instructions after halt are interpreted as .FILL')
 parser.add_argument('-s', '--space', action='store_true', help='put space around labels')
 args = parser.parse_args()
+
 disassemble(args.fill, args.space)
