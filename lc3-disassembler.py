@@ -1,5 +1,5 @@
 #!/bin/python3
-import sys, argparse
+import sys, argparse, pathlib
 
 def parse_hex(x):
     if x[0] == 'x': x = x[1:]
@@ -47,15 +47,15 @@ def decode_instruction(n, i):
             exit()
     match i[0:4]:
         case '0001': 
-            if i[5] == '1':
-                return Asm(n, 'ADD', [decode_reg(i[4:7]), decode_reg(i[7:10]), decode_int(i[11:15])])
+            if i[10] == '1':
+                return Asm(n, 'ADD', [decode_reg(i[4:7]), decode_reg(i[7:10]), decode_int(i[11:16])])
             else:
-                return Asm(n, 'ADD', [decode_reg(i[4:7]), decode_reg(i[7:10]), decode_reg(i[13:15])])
+                return Asm(n, 'ADD', [decode_reg(i[4:7]), decode_reg(i[7:10]), decode_reg(i[13:16])])
         case '0101':
-            if i[5] == '1':
-                return Asm(n, 'AND', [decode_reg(i[4:7]), decode_reg(i[7:10]), decode_int(i[11:15])])
+            if i[10] == '1':
+                return Asm(n, 'AND', [decode_reg(i[4:7]), decode_reg(i[7:10]), decode_int(i[11:16])])
             else:
-                return Asm(n, 'AND', [decode_reg(i[4:7]), decode_reg(i[7:10]), decode_reg(i[13:15])])
+                return Asm(n, 'AND', [decode_reg(i[4:7]), decode_reg(i[7:10]), decode_reg(i[13:16])])
         case '1001':
             return Asm(n, 'NOT', [decode_reg(i[4:7]), decode_reg(i[7:10])])
         case '0000':
@@ -67,7 +67,10 @@ def decode_instruction(n, i):
             else:
                 return Asm(n, 'JMP', [reg])
         case '0100': 
-            return Asm(n, 'JSR(R)')
+            if i[4] == '1':
+                return Asm(n, 'JSR', label=decode_pcoffset(n, i[5:16]))
+            else:
+                return Asm(n, 'JSRR', [decode_reg(i[7:10])])
         case '1000':
             return Asm('RTI')
         case '1110':
@@ -112,18 +115,13 @@ def decode_instruction(n, i):
 def fill_instruction(n, i):
     return Asm(n, '.FILL', [decode_hex(i)])
 
-def disassemble(auto_fill, space_labels):
+def disassemble(instructions, auto_fill):
     asm_lines = []
     labels = set()
     asm_lines.append(Asm(None, '.ORIG', ['x3000']))
     n = 0
     after_halt = False
-    for line in sys.stdin:
-        if line[0] == 'x':
-            instr_val = parse_hex(line)
-            instr = "{0:b}".format(instr_val).zfill(16)
-        else:
-            instr = line.strip()
+    for instr in instructions:
         if not after_halt:
             asm = decode_instruction(n, instr)
             if asm.label:
@@ -144,16 +142,15 @@ def disassemble(auto_fill, space_labels):
         n += 1
 
     for asm in asm_lines:
-        if asm.location in label_names:
-            print(label_names[asm.location], end='\n' if space_labels else '') 
-        print('\t', asm.opcode, end='')
+        print(label_names[asm.location].ljust(8) if asm.location in label_names else 8 * ' ', end='') 
+        print(asm.opcode.ljust(6), end='')
         params = []
         if asm.operands:
             params.extend(asm.operands)
         if asm.label:
             params.append(label_names[asm.label])
         if len(params) > 0:
-            print('\t', ', '.join(params), end='')
+            print(' ', ', '.join(params), end='')
         print('')
 
 
@@ -162,7 +159,15 @@ parser = argparse.ArgumentParser(
         description = 'Disassemble LC-3 machine code',
         epilog = 'By Rijk van Putten <rijk@rijkvp.nl>')
 parser.add_argument('-f', '--fill', action='store_true', help='instructions after halt are interpreted as .FILL')
-parser.add_argument('-s', '--space', action='store_true', help='put space around labels')
 args = parser.parse_args()
 
-disassemble(args.fill, args.space)
+instructions = []
+
+for line in sys.stdin:
+    if line[0] == 'x':
+        instr_val = parse_hex(line)
+        instructions.append("{0:b}".format(instr_val).zfill(16))
+    else:
+        instructions.append(line.strip())
+
+disassemble(instructions, args.fill)
