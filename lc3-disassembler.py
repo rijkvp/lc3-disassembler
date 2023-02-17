@@ -80,13 +80,13 @@ def decode_instruction(n, i):
         case '1010':
             return Asm(n, 'LDI', [decode_reg(i[4:7])], decode_pcoffset(n, i[7:16]))
         case '0110':
-            return Asm(n, 'LDR', [decode_reg(i[4:7]), decode_reg(i[7:10])], decode_pcoffset(i[10:16]))
+            return Asm(n, 'LDR', [decode_reg(i[4:7]), decode_reg(i[7:10]), decode_int(i[10:16])])
         case '0011':
             return Asm(n, 'ST', [decode_reg(i[4:7])], decode_pcoffset(n, i[7:16]))
         case '1011':
             return Asm(n, 'STI', [decode_reg(i[4:7])], decode_pcoffset(n, i[7:16]))
         case '0111':
-            return Asm(n, 'STR', [decode_reg(i[4:7]), decode_reg(i[7:10])], decode_pcoffset(i[10:16]))
+            return Asm(n, 'STR', [decode_reg(i[4:7]), decode_reg(i[7:10]), decode_int(i[10:16])])
         case '1111':
             trapvec = decode_hex(i[8:16])
             shorthand = None
@@ -164,7 +164,9 @@ args = parser.parse_args()
 instructions = []
 
 for line in sys.stdin:
-    if line[0] == 'x':
+    if line.strip() == '':
+        continue
+    elif line[0] == 'x':
         instr_val = parse_hex(line)
         instructions.append("{0:b}".format(instr_val).zfill(16))
     else:
